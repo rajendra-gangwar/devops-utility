@@ -1,0 +1,68 @@
+# name: Lets Encrypt Certificate Auto Renewal
+
+# on:
+#   # schedule:
+#   #   - cron: '0 2 * * *'  # Daily at 2 AM UTC
+#   workflow_dispatch:
+
+# permissions:
+#   id-token: write    # Required for OIDC (both AWS and Azure)
+#   contents: read
+
+# jobs:
+#   renew:
+#     runs-on: ubuntu-latest
+#     environment: deploy
+
+#     steps:
+#       - uses: actions/checkout@v4
+
+#       - name: Azure Login (OIDC)
+#         uses: azure/login@v2
+#         with:
+#           client-id: ${{ vars.AZURE_CLIENT_ID }}
+#           tenant-id: ${{ vars.AZURE_TENANT_ID }}
+#           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+#       - name: Setup Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: '3.11'
+
+#       - name: Install dependencies
+#         run: |
+#           sudo apt-get update
+#           pip install -r requirements.txt
+
+#       - name: Run certificate renewal
+#         id: cert_renewal
+#         env:
+#           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+#           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+#         run: |
+#           # Run the renewal script and capture output
+#           python main.py --auto --verbose 2>&1 | tee renewal_output.txt
+#           EXIT_CODE=${PIPESTATUS[0]}
+#
+#           # Extract PIPELINE_STATUS from output
+#           PIPELINE_STATUS=$(grep "^PIPELINE_STATUS=" renewal_output.txt | cut -d'=' -f2 || echo "UNKNOWN")
+#
+#           # Set GitHub Actions output
+#           echo "script_status=${PIPELINE_STATUS}" >> $GITHUB_OUTPUT
+#
+#           # Exit with original exit code
+#           exit $EXIT_CODE
+#
+#       - name: Report pipeline status
+#         if: always()
+#         run: |
+#           STATUS="${{ steps.cert_renewal.outputs.script_status }}"
+#           if [ "$STATUS" = "SUCCESS" ]; then
+#             echo "Certificate renewal pipeline: SUCCESS"
+#           elif [ "$STATUS" = "FAILURE" ]; then
+#             echo "Certificate renewal pipeline: FAILURE"
+#             exit 1
+#           else
+#             echo "Certificate renewal pipeline: UNKNOWN"
+#             exit 1
+#           fi

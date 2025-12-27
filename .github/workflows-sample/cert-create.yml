@@ -1,0 +1,106 @@
+# name: Create Certificate
+
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       san:
+#         description: 'Comma-separated list of domains (e.g., example.com,www.example.com)'
+#         required: true
+#         type: string
+#       vault_url:
+#         description: 'Key Vault URL (e.g., https://my-vault.vault.azure.net/)'
+#         required: true
+#         type: string
+#       subscription:
+#         description: 'Azure Subscription ID for the Key Vault'
+#         required: true
+#         type: string
+#       cert_name:
+#         description: 'Certificate name in Key Vault'
+#         required: true
+#         type: string
+#       key_type:
+#         description: 'Key type: rsa or ecdsa (default: from config.yaml)'
+#         required: false
+#         default: ''
+#         type: choice
+#         options:
+#           - ''
+#           - rsa
+#           - ecdsa
+#       rsa_key_size:
+#         description: 'RSA key size: 2048, 3072, or 4096 (when key_type is rsa)'
+#         required: false
+#         default: ''
+#         type: choice
+#         options:
+#           - ''
+#           - '2048'
+#           - '3072'
+#           - '4096'
+#       elliptic_curve:
+#         description: 'ECDSA curve: secp256r1 or secp384r1 (when key_type is ecdsa)'
+#         required: false
+#         default: ''
+#         type: choice
+#         options:
+#           - ''
+#           - secp256r1
+#           - secp384r1
+
+# permissions:
+#   id-token: write    # Required for OIDC (both AWS and Azure)
+#   contents: read
+
+# jobs:
+#   create:
+#     runs-on: ubuntu-latest
+#     environment: deploy
+#     steps:
+#       - uses: actions/checkout@v4
+
+#       - name: Azure Login (OIDC)
+#         uses: azure/login@v2
+#         with:
+#           client-id: ${{ vars.AZURE_CLIENT_ID }}
+#           tenant-id: ${{ vars.AZURE_TENANT_ID }}
+#           subscription-id: ${{ inputs.subscription }}
+#           environment: azurecloud
+          
+#       - name: Setup Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: '3.11'
+
+#       - name: Install dependencies
+#         run: |
+#           sudo apt-get update
+#           pip install -r requirements.txt
+          
+#       - name: Create certificate
+#         env:
+#           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+#           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+#           PFX_PASSWORD: ${{ secrets.PFX_PASSWORD }}
+#         run: |
+#           # Build base command
+#           CMD="python main.py --task create \
+#             --san \"${{ inputs.san }}\" \
+#             --vault-url \"${{ inputs.vault_url }}\" \
+#             --subscription \"${{ inputs.subscription }}\" \
+#             --cert-name \"${{ inputs.cert_name }}\" \
+#             --verbose"
+#
+#           # Add key type options if specified
+#           if [ -n "${{ inputs.key_type }}" ]; then
+#             CMD="$CMD --key-type ${{ inputs.key_type }}"
+#           fi
+#           if [ -n "${{ inputs.rsa_key_size }}" ]; then
+#             CMD="$CMD --rsa-key-size ${{ inputs.rsa_key_size }}"
+#           fi
+#           if [ -n "${{ inputs.elliptic_curve }}" ]; then
+#             CMD="$CMD --elliptic-curve ${{ inputs.elliptic_curve }}"
+#           fi
+#
+#           # Execute command
+#           eval $CMD

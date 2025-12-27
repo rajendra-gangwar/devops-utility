@@ -1,0 +1,106 @@
+# Azure Key Vault Certificate Renewal Configuration
+# =================================================
+#
+# This file configures which Azure Key Vaults to scan for expiring
+# Let's Encrypt certificates and how to renew them.
+
+# Global settings
+settings:
+  # Days before expiration to trigger renewal (default: 10)
+  expiration_threshold_days: 10
+
+  # Email address for Let's Encrypt registration/notifications (optional)
+  # If empty or not provided, registers without email (--register-unsafely-without-email)
+  # Recommended to set for important expiry/renewal notifications
+  letsencrypt_email: "devops@example.com"
+
+  # Continue processing other certificates if one fails
+  continue_on_error: true
+
+  # Delete local certificate files after uploading to Key Vault
+  cleanup_after_upload: true
+
+  # Certbot working directories
+  certbot_work_dir: "/tmp/certbot"
+  certbot_logs_dir: "/tmp/certbot-logs"
+  certbot_config_dir: "/tmp/certbot-config"
+
+  # Certificate key configuration
+  # key_type: "rsa" or "ecdsa" (default: rsa)
+  key_type: "rsa"
+  # rsa_key_size: 2048, 3072, or 4096 (default: 2048, used when key_type is rsa)
+  rsa_key_size: 2048
+  # elliptic_curve: secp256r1 or secp384r1 (default: secp384r1, used when key_type is ecdsa)
+  elliptic_curve: "secp384r1"
+
+# DNS Provider configurations
+# Used for ACME DNS-01 challenge validation
+dns_providers:
+  # AWS Route53 configuration
+  # Authentication: Uses OIDC federation in GitHub Actions
+  # Required IAM permissions:
+  #   - route53:GetChange
+  #   - route53:ChangeResourceRecordSets
+  #   - route53:ListHostedZones
+  route53:
+    # Map AWS account IDs to their hosted zones and IAM roles
+    accounts:
+      "123456789012":
+        hosted_zones:
+          - "example.com"
+          - "example.org"
+        # IAM role to assume for this account (for cross-account access)
+        role_arn: "arn:aws:iam::123456789012:role/CertbotRoute53Role"
+        # region: "eu-west-1"  # Optional - defaults to eu-west-1 (can override via --aws-region or AWS_DEFAULT_REGION)
+
+      "987654321098":
+        hosted_zones:
+          - "another-domain.com"
+        role_arn: "arn:aws:iam::987654321098:role/CertbotRoute53Role"
+        # region: "eu-west-1"  # Optional - defaults to eu-west-1
+
+  # Azure DNS configuration
+  # Authentication: Uses DefaultAzureCredential (env vars or managed identity)
+  # Each zone specifies its own resource group
+  azure:
+    subscriptions:
+      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee":
+        zones:
+          - zone: "contoso.com"
+            resource_group: "dns-rg-contoso"
+          - zone: "fabrikam.com"
+            resource_group: "dns-rg-fabrikam"
+
+# Azure Key Vaults to scan for expiring certificates
+# DNS provider is auto-detected by matching certificate domains to dns_providers zones
+#
+# Certificate Selection Rules:
+#   1. ignore_certificates: ALWAYS takes precedence - these are NEVER processed
+#   2. include_certificates empty/missing: Process ALL certificates (minus ignored)
+#   3. include_certificates specified: ONLY process these certificates (minus ignored)
+#
+vaults:
+  # Production Key Vault - explicit whitelist mode
+  - name: "prod-keyvault"
+    url: "https://prod-keyvault.vault.azure.net/"
+    # Only process these specific certificates (whitelist mode)
+    include_certificates:
+      - "api-prod-cert"
+      - "frontend-prod-cert"
+    # These are ALWAYS skipped, even if in include_certificates
+    ignore_certificates:
+      - "legacy-cert"
+      - "imported-cert"
+
+  # Staging Key Vault - process all certificates (default behavior)
+  - name: "staging-keyvault"
+    url: "https://staging-keyvault.vault.azure.net/"
+    # include_certificates not specified = process all certs in vault
+    ignore_certificates: []
+
+  # Another vault example - process all except ignored
+  - name: "azure-keyvault"
+    url: "https://azure-keyvault.vault.azure.net/"
+    include_certificates: []  # Empty list = process all (same as not specified)
+    ignore_certificates:
+      - "manual-cert"
