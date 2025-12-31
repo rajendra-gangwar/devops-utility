@@ -9,11 +9,31 @@ import os
 import subprocess
 import tempfile
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+
 from .logger import get_logger
 from .config_loader import Config
+
+
+def get_certificate_expiry(cert_path: str) -> datetime:
+    """
+    Extract the expiry date from a PEM certificate file.
+
+    Args:
+        cert_path: Path to the PEM certificate file
+
+    Returns:
+        Certificate expiry datetime (timezone-aware UTC)
+    """
+    with open(cert_path, "rb") as f:
+        cert_data = f.read()
+    cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+    return cert.not_valid_after_utc
 
 
 class CertbotError(Exception):

@@ -41,7 +41,7 @@ from utils.keyvault import (
     upload_certificate,
     CertificateInfo,
 )
-from utils.certbot import run_certbot_renewal, run_certbot_create, convert_to_pfx
+from utils.certbot import run_certbot_renewal, run_certbot_create, convert_to_pfx, get_certificate_expiry
 from utils.helpers import (
     is_expiring_soon,
     is_letsencrypt_issuer,
@@ -563,14 +563,15 @@ def process_certificate(
 
         logger.info(f"  [{cert_name}] Successfully renewed and uploaded")
 
-        # Send success notification
+        # Send success notification with new certificate expiry date
         if notification_manager and notification_manager.is_enabled():
+            new_expiry_date = get_certificate_expiry(cert_paths["cert"])
             _send_certificate_notification(
                 notification_manager=notification_manager,
                 vault_name=vault_name,
                 cert_name=cert_name,
                 domains=cert_info.domains,
-                expiry_date=cert_info.expires_on,
+                expiry_date=new_expiry_date,
                 status="SUCCESS",
             )
 
@@ -939,14 +940,15 @@ def create_certificate(
 
         logger.info(f"  Successfully created and uploaded certificate: {cert_name}")
 
-        # Send success notification
+        # Send success notification with new certificate expiry date
         if notification_manager and notification_manager.is_enabled():
+            new_expiry_date = get_certificate_expiry(cert_paths["cert"])
             _send_certificate_notification(
                 notification_manager=notification_manager,
                 vault_name=vault_name,
                 cert_name=cert_name,
                 domains=domains,
-                expiry_date=None,  # New cert, expiry will be ~90 days from now
+                expiry_date=new_expiry_date,
                 status="SUCCESS",
             )
 
