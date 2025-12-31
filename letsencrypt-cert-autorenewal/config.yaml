@@ -132,10 +132,9 @@ notifications:
   # Microsoft Teams notifications via incoming webhook
   teams:
     enabled: false
-    # Teams incoming webhook URL
-    # Create via: Teams Channel > Connectors > Incoming Webhook
-    # Can also be set via TEAMS_WEBHOOK_URL environment variable
-    webhook_url: "${TEAMS_WEBHOOK_URL}"
+    # Webhook URL is set via TEAMS_WEBHOOK_URL environment variable
+    # Create webhook via: Teams Channel > Connectors > Incoming Webhook
+
     # Optional: Custom message template (JSON Adaptive Card)
     # If not specified, a default Adaptive Card is used
     # template_path: "templates/teams_notification.json"

@@ -309,10 +309,10 @@ class TeamsWebhookNotifier(NotificationSender):
 
     def send(self, context: NotificationContext) -> bool:
         """Send notification to Teams via webhook."""
-        # Get webhook URL from config, fallback to environment variable
-        webhook_url = self.config.webhook_url or os.environ.get("TEAMS_WEBHOOK_URL", "")
+        # Get webhook URL from environment variable
+        webhook_url = os.environ.get("TEAMS_WEBHOOK_URL", "")
         if not webhook_url:
-            self.logger.warning("Teams webhook URL not configured (set TEAMS_WEBHOOK_URL env var or teams.webhook_url in config), skipping Teams notification")
+            self.logger.warning("TEAMS_WEBHOOK_URL environment variable not set, skipping Teams notification")
             return False
 
         try:

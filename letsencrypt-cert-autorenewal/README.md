@@ -333,8 +333,9 @@ Configure notification channels for certificate renewal events. Notifications ar
 | `email.to_emails` | list | List of recipient email addresses |
 | `email.template_path` | string | Optional: Path to custom HTML email template |
 | `teams.enabled` | bool | Enable Microsoft Teams notifications |
-| `teams.webhook_url` | string | Teams incoming webhook URL (or use `TEAMS_WEBHOOK_URL` env var) |
 | `teams.template_path` | string | Optional: Path to custom JSON Adaptive Card template |
+
+**Note:** Teams webhook URL is set via the `TEAMS_WEBHOOK_URL` environment variable.
 
 **Example configuration:**
 
@@ -350,7 +351,7 @@ notifications:
 
   teams:
     enabled: true
-    webhook_url: "${TEAMS_WEBHOOK_URL}"  # Use environment variable
+    # Webhook URL is set via TEAMS_WEBHOOK_URL environment variable
     # template_path: "templates/teams_notification.json"  # Optional
 ```
 
@@ -718,7 +719,7 @@ python main.py --auto
 
 **Teams notifications not being sent**
 - Verify the webhook URL is correct and active
-- Ensure `TEAMS_WEBHOOK_URL` env var or `teams.webhook_url` config is set
+- Ensure `TEAMS_WEBHOOK_URL` environment variable is set
 - Check that `teams.enabled` is `true` in config
 - Teams webhook URLs expire if the connector is removed from the channel
 

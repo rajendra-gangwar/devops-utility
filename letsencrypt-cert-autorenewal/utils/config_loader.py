@@ -131,9 +131,11 @@ class EmailNotificationConfig:
 
 @dataclass
 class TeamsNotificationConfig:
-    """Teams notification configuration."""
+    """Teams notification configuration.
+
+    Note: webhook_url is fetched from TEAMS_WEBHOOK_URL environment variable.
+    """
     enabled: bool = False
-    webhook_url: Optional[str] = None
     template_path: Optional[str] = None
 
 
@@ -367,7 +369,6 @@ def _parse_notifications(data: Dict[str, Any]) -> NotificationsConfig:
     teams_data = data.get("teams", {})
     teams_config = TeamsNotificationConfig(
         enabled=teams_data.get("enabled", False),
-        webhook_url=teams_data.get("webhook_url"),
         template_path=teams_data.get("template_path"),
     )
 
