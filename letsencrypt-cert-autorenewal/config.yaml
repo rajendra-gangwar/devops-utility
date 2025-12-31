@@ -104,3 +104,38 @@ vaults:
     include_certificates: []  # Empty list = process all (same as not specified)
     ignore_certificates:
       - "manual-cert"
+
+# Notification Configuration
+# ==========================
+# Configure notification channels for certificate renewal events.
+# Notifications are sent per-certificate for both success and failure events.
+#
+# Supported channels:
+#   - email: SendGrid API for email notifications
+#   - teams: Microsoft Teams incoming webhooks
+#
+# Notification failures are logged but do NOT affect the main renewal workflow.
+notifications:
+  # Email notifications via SendGrid
+  email:
+    enabled: false
+    # Sender email address (must be verified in SendGrid)
+    from_email: "certificates@example.com"
+    # Recipient email addresses
+    to_emails:
+      - "devops@example.com"
+      - "security@example.com"
+    # Optional: Custom email template (HTML)
+    # If not specified, a default template is used
+    # template_path: "templates/email_notification.html"
+
+  # Microsoft Teams notifications via incoming webhook
+  teams:
+    enabled: false
+    # Teams incoming webhook URL
+    # Create via: Teams Channel > Connectors > Incoming Webhook
+    # Can also be set via TEAMS_WEBHOOK_URL environment variable
+    webhook_url: "${TEAMS_WEBHOOK_URL}"
+    # Optional: Custom message template (JSON Adaptive Card)
+    # If not specified, a default Adaptive Card is used
+    # template_path: "templates/teams_notification.json"

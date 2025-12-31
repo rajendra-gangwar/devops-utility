@@ -49,6 +49,7 @@ from utils.helpers import (
     select_certificates,
     SelectionReason,
 )
+from utils.notification import NotificationManager, NotificationContext
 
 
 class RenewalStatus(Enum):
@@ -405,6 +406,45 @@ Examples:
     return args
 
 
+def _send_certificate_notification(
+    notification_manager: NotificationManager,
+    vault_name: str,
+    cert_name: str,
+    domains: List[str],
+    expiry_date: Optional[datetime],
+    status: str,
+    failure_reason: Optional[str] = None,
+) -> None:
+    """
+    Send notification for a certificate event.
+
+    This is a non-blocking helper that logs but doesn't raise on failure.
+
+    Args:
+        notification_manager: Notification manager instance
+        vault_name: Name of the Key Vault
+        cert_name: Name of the certificate
+        domains: List of domains (first is CN, rest are SANs)
+        expiry_date: Certificate expiry date
+        status: Notification status ("SUCCESS" or "FAILED")
+        failure_reason: Reason for failure (if status is FAILED)
+    """
+    # Extract CN from domains list
+    common_name = domains[0] if domains else "Unknown"
+
+    context = NotificationContext(
+        vault_name=vault_name,
+        certificate_name=cert_name,
+        common_name=common_name,
+        san_list=domains if domains else [],
+        expiry_date=expiry_date,
+        status=status,
+        failure_reason=failure_reason,
+    )
+
+    notification_manager.notify(context)
+
+
 def process_certificate(
     kv_client: KeyVaultClient,
     cert_info: CertificateInfo,
@@ -412,6 +452,7 @@ def process_certificate(
     config: Config,
     dry_run: bool = False,
     pfx_password: Optional[str] = None,
+    notification_manager: Optional[NotificationManager] = None,
 ) -> RenewalResult:
     """
     Process a single certificate for potential renewal.
@@ -423,6 +464,7 @@ def process_certificate(
         config: Global configuration
         dry_run: If True, don't make actual changes
         pfx_password: Password for PFX certificate
+        notification_manager: Optional notification manager for sending alerts
 
     Returns:
         RenewalResult with status and details
@@ -520,6 +562,18 @@ def process_certificate(
         )
 
         logger.info(f"  [{cert_name}] Successfully renewed and uploaded")
+
+        # Send success notification
+        if notification_manager and notification_manager.is_enabled():
+            _send_certificate_notification(
+                notification_manager=notification_manager,
+                vault_name=vault_name,
+                cert_name=cert_name,
+                domains=cert_info.domains,
+                expiry_date=cert_info.expires_on,
+                status="SUCCESS",
+            )
+
         return RenewalResult(
             vault_name=vault_name,
             certificate_name=cert_name,
@@ -529,12 +583,26 @@ def process_certificate(
         )
 
     except Exception as e:
-        logger.error(f"  [{cert_name}] Renewal failed: {e}")
+        error_msg = str(e)
+        logger.error(f"  [{cert_name}] Renewal failed: {error_msg}")
+
+        # Send failure notification
+        if notification_manager and notification_manager.is_enabled():
+            _send_certificate_notification(
+                notification_manager=notification_manager,
+                vault_name=vault_name,
+                cert_name=cert_name,
+                domains=cert_info.domains,
+                expiry_date=cert_info.expires_on,
+                status="FAILED",
+                failure_reason=error_msg,
+            )
+
         return RenewalResult(
             vault_name=vault_name,
             certificate_name=cert_name,
             status=RenewalStatus.FAILED,
-            message=str(e),
+            message=error_msg,
             domains=cert_info.domains,
         )
 
@@ -598,6 +666,7 @@ def process_vault(
     config: Config,
     dry_run: bool = False,
     pfx_password: Optional[str] = None,
+    notification_manager: Optional[NotificationManager] = None,
 ) -> VaultSummary:
     """
     Process certificates in a vault based on include/ignore configuration.
@@ -612,6 +681,7 @@ def process_vault(
         config: Global configuration
         dry_run: If True, don't make actual changes
         pfx_password: Password for PFX certificate
+        notification_manager: Optional notification manager for sending alerts
 
     Returns:
         VaultSummary with all processing results and statistics
@@ -673,6 +743,7 @@ def process_vault(
                 config=config,
                 dry_run=dry_run,
                 pfx_password=pfx_password,
+                notification_manager=notification_manager,
             )
             vault_summary.results.append(result)
 
@@ -710,6 +781,7 @@ def process_single_certificate(
     config: Config,
     dry_run: bool = False,
     pfx_password: Optional[str] = None,
+    notification_manager: Optional[NotificationManager] = None,
 ) -> RenewalResult:
     """
     Process a single certificate in manual mode.
@@ -720,6 +792,7 @@ def process_single_certificate(
         config: Global configuration
         dry_run: If True, don't make actual changes
         pfx_password: Password for PFX certificate
+        notification_manager: Optional notification manager for sending alerts
 
     Returns:
         RenewalResult with status and details
@@ -765,6 +838,7 @@ def process_single_certificate(
             config=config,
             dry_run=dry_run,
             pfx_password=pfx_password,
+            notification_manager=notification_manager,
         )
 
     except Exception as e:
@@ -785,6 +859,7 @@ def create_certificate(
     config: Config,
     dry_run: bool = False,
     pfx_password: Optional[str] = None,
+    notification_manager: Optional[NotificationManager] = None,
 ) -> RenewalResult:
     """
     Create a new certificate and upload to Key Vault.
@@ -797,6 +872,7 @@ def create_certificate(
         config: Global configuration
         dry_run: If True, don't make actual changes
         pfx_password: Password for PFX certificate
+        notification_manager: Optional notification manager for sending alerts
 
     Returns:
         RenewalResult with status and details
@@ -862,6 +938,18 @@ def create_certificate(
         )
 
         logger.info(f"  Successfully created and uploaded certificate: {cert_name}")
+
+        # Send success notification
+        if notification_manager and notification_manager.is_enabled():
+            _send_certificate_notification(
+                notification_manager=notification_manager,
+                vault_name=vault_name,
+                cert_name=cert_name,
+                domains=domains,
+                expiry_date=None,  # New cert, expiry will be ~90 days from now
+                status="SUCCESS",
+            )
+
         return RenewalResult(
             vault_name=vault_name,
             certificate_name=cert_name,
@@ -871,7 +959,21 @@ def create_certificate(
         )
 
     except Exception as e:
-        logger.error(f"  Certificate creation failed: {e}")
+        error_msg = str(e)
+        logger.error(f"  Certificate creation failed: {error_msg}")
+
+        # Send failure notification
+        if notification_manager and notification_manager.is_enabled():
+            _send_certificate_notification(
+                notification_manager=notification_manager,
+                vault_name=vault_name,
+                cert_name=cert_name,
+                domains=domains,
+                expiry_date=None,
+                status="FAILED",
+                failure_reason=error_msg,
+            )
+
         return RenewalResult(
             vault_name=vault_name,
             certificate_name=cert_name,
@@ -1024,6 +1126,19 @@ def print_execution_summary(
         logger.info("--- END JSON SUMMARY ---")
 
 
+def _create_notification_manager(config: Config) -> NotificationManager:
+    """
+    Create and configure the notification manager from config.
+
+    Args:
+        config: Application configuration
+
+    Returns:
+        Configured NotificationManager instance
+    """
+    return NotificationManager(config.notifications)
+
+
 def main() -> int:
     """
     Main entry point.
@@ -1101,6 +1216,11 @@ def main() -> int:
         if pfx_password:
             logger.info("PFX password configured")
 
+        # Initialize notification manager
+        notification_manager = _create_notification_manager(config)
+        if notification_manager.is_enabled():
+            logger.info("Notifications enabled")
+
         # Process based on task/mode
         if args.task == "create":
             # Create mode - create new certificate and upload to Key Vault
@@ -1115,6 +1235,7 @@ def main() -> int:
                 config=config,
                 dry_run=args.dry_run,
                 pfx_password=pfx_password,
+                notification_manager=notification_manager,
             )
 
             # Create vault summary for create task
@@ -1143,6 +1264,7 @@ def main() -> int:
                     config=config,
                     dry_run=args.dry_run,
                     pfx_password=pfx_password,
+                    notification_manager=notification_manager,
                 )
                 summary.add_vault_summary(vault_summary)
 
@@ -1154,6 +1276,7 @@ def main() -> int:
                 config=config,
                 dry_run=args.dry_run,
                 pfx_password=pfx_password,
+                notification_manager=notification_manager,
             )
 
             # Find vault URL from config

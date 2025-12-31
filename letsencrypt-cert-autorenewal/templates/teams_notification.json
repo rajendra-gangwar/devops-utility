@@ -1,0 +1,73 @@
+{
+    "type": "message",
+    "attachments": [
+        {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                "type": "AdaptiveCard",
+                "version": "1.4",
+                "body": [
+                    {
+                        "type": "TextBlock",
+                        "size": "Large",
+                        "weight": "Bolder",
+                        "text": "{{status_emoji}} Certificate Renewal {{status}}",
+                        "wrap": true,
+                        "style": "heading"
+                    },
+                    {
+                        "type": "TextBlock",
+                        "text": "A certificate renewal event has occurred.",
+                        "wrap": true,
+                        "spacing": "Small"
+                    },
+                    {
+                        "type": "Container",
+                        "style": "emphasis",
+                        "items": [
+                            {
+                                "type": "FactSet",
+                                "facts": [
+                                    {
+                                        "title": "Vault Name",
+                                        "value": "{{vault_name}}"
+                                    },
+                                    {
+                                        "title": "Certificate Name",
+                                        "value": "{{certificate_name}}"
+                                    },
+                                    {
+                                        "title": "Common Name (CN)",
+                                        "value": "{{common_name}}"
+                                    },
+                                    {
+                                        "title": "Subject Alternative Names",
+                                        "value": "{{san_list}}"
+                                    },
+                                    {
+                                        "title": "Expiry Date",
+                                        "value": "{{expiry_date}}"
+                                    },
+                                    {
+                                        "title": "Renewal Status",
+                                        "value": "{{status}}"
+                                    },
+                                    {
+                                        "title": "Failure Reason",
+                                        "value": "{{failure_reason}}"
+                                    }
+                                ]
+                            }
+                        ],
+                        "spacing": "Medium"
+                    }
+                ],
+                "msteams": {
+                    "width": "Full"
+                }
+            }
+        }
+    ]
+}

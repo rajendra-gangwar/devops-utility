@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Certificate Renewal Notification</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            padding: 30px 20px;
+            text-align: center;
+            color: white;
+        }
+        .header.status-success {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        }
+        .header.status-failed {
+            background: linear-gradient(135deg, #dc3545 0%, #e74c3c 100%);
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .header .status-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        .content {
+            padding: 30px 20px;
+        }
+        .detail-row {
+            margin: 15px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            border-left: 4px solid {{border_color}};
+        }
+        .detail-row:hover {
+            background-color: #e9ecef;
+        }
+        .label {
+            font-weight: 600;
+            color: #495057;
+            display: block;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .value {
+            color: #212529;
+            font-size: 16px;
+            word-break: break-word;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .status-badge.success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-badge.failed {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .failure-section {
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #fff3f3;
+            border-radius: 6px;
+            border-left: 4px solid #dc3545;
+        }
+        .failure-section .label {
+            color: #721c24;
+        }
+        .failure-section .value {
+            color: #721c24;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+        }
+        .footer {
+            padding: 20px;
+            text-align: center;
+            background-color: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+        }
+        .footer p {
+            margin: 0;
+            font-size: 12px;
+            color: #6c757d;
+        }
+        .footer a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        .san-list {
+            font-size: 14px;
+            color: #495057;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header {{status_class}}">
+            <div class="status-icon">{{status_emoji}}</div>
+            <h1>Certificate Renewal {{status}}</h1>
+        </div>
+        <div class="content">
+            <div class="detail-row">
+                <span class="label">Vault Name</span>
+                <span class="value">{{vault_name}}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Certificate Name</span>
+                <span class="value">{{certificate_name}}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Common Name (CN)</span>
+                <span class="value">{{common_name}}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Subject Alternative Names (SAN)</span>
+                <span class="value san-list">{{san_list}}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Expiry Date</span>
+                <span class="value">{{expiry_date}}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Renewal Status</span>
+                <span class="value">
+                    <span class="status-badge {{status_class}}">{{status}}</span>
+                </span>
+            </div>
+            {{failure_section}}
+        </div>
+        <div class="footer">
+            <p>This is an automated notification from the Let's Encrypt Certificate Renewal System.</p>
+            <p>Do not reply to this email.</p>
+        </div>
+    </div>
+</body>
+</html>

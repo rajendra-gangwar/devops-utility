@@ -7,10 +7,18 @@ This package contains:
 - config_loader: Configuration loading and validation
 - logger: Centralized logging setup
 - helpers: Common utility functions
+- notification: Notification system for renewal events
 """
 
 from .logger import setup_logger, get_logger
-from .config_loader import load_config, Config, VaultConfig
+from .config_loader import (
+    load_config,
+    Config,
+    VaultConfig,
+    NotificationsConfig,
+    EmailNotificationConfig,
+    TeamsNotificationConfig,
+)
 from .keyvault import KeyVaultClient, CertificateInfo
 from .certbot import run_certbot_renewal, convert_to_pfx
 from .helpers import (
@@ -22,6 +30,10 @@ from .helpers import (
     SelectionReason,
     CertificateSelection,
 )
+from .notification import (
+    NotificationManager,
+    NotificationContext,
+)
 
 __all__ = [
     # Logger
@@ -31,6 +43,9 @@ __all__ = [
     "load_config",
     "Config",
     "VaultConfig",
+    "NotificationsConfig",
+    "EmailNotificationConfig",
+    "TeamsNotificationConfig",
     # Key Vault
     "KeyVaultClient",
     "CertificateInfo",
@@ -45,4 +60,7 @@ __all__ = [
     "SelectionResult",
     "SelectionReason",
     "CertificateSelection",
+    # Notifications
+    "NotificationManager",
+    "NotificationContext",
 ]

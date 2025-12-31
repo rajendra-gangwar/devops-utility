@@ -34,6 +34,7 @@ This solution uses **Certbot DNS plugins** which **automatically handle DNS reco
 - **Continue on Errors**: Process all certificates even if some fail
 - **Dry-Run Mode**: Test without making actual changes
 - **Colored Logging**: Clear, structured output with color-coded status
+- **Notification System**: Email (SendGrid) and Microsoft Teams notifications for renewal events
 
 ## Project Structure
 
@@ -42,13 +43,17 @@ letsencrypt/
 ├── main.py                  # Entry point with argparse CLI
 ├── config.yaml              # Configuration file (YAML format)
 ├── requirements.txt         # Python dependencies
+├── templates/               # Notification templates
+│   ├── email_notification.html   # Email template (HTML)
+│   └── teams_notification.json   # Teams Adaptive Card template
 ├── utils/
 │   ├── __init__.py          # Package exports
 │   ├── keyvault.py          # Azure Key Vault operations
 │   ├── certbot.py           # Certbot renewal wrapper
 │   ├── config_loader.py     # YAML config loading and validation
 │   ├── logger.py            # Centralized structured logging
-    └── helpers.py           # Common utility functions
+│   ├── helpers.py           # Common utility functions
+│   └── notification.py      # Email (SendGrid) and Teams notifications
 
 ```
 
@@ -317,6 +322,53 @@ vaults:
 
 **Note**: DNS provider is auto-detected by matching certificate domains against the zones configured in `dns_providers`. This allows a single vault to contain certificates using different DNS providers.
 
+#### notifications
+
+Configure notification channels for certificate renewal events. Notifications are sent **per-certificate** for both success and failure events.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `email.enabled` | bool | Enable email notifications via SendGrid |
+| `email.from_email` | string | Sender email address (must be verified in SendGrid) |
+| `email.to_emails` | list | List of recipient email addresses |
+| `email.template_path` | string | Optional: Path to custom HTML email template |
+| `teams.enabled` | bool | Enable Microsoft Teams notifications |
+| `teams.webhook_url` | string | Teams incoming webhook URL (or use `TEAMS_WEBHOOK_URL` env var) |
+| `teams.template_path` | string | Optional: Path to custom JSON Adaptive Card template |
+
+**Example configuration:**
+
+```yaml
+notifications:
+  email:
+    enabled: true
+    from_email: "certificates@example.com"
+    to_emails:
+      - "devops@example.com"
+      - "security@example.com"
+    # template_path: "templates/email_notification.html"  # Optional
+
+  teams:
+    enabled: true
+    webhook_url: "${TEAMS_WEBHOOK_URL}"  # Use environment variable
+    # template_path: "templates/teams_notification.json"  # Optional
+```
+
+**Notification behavior:**
+- Notifications are sent for **every certificate processed** (success or failure)
+- Notification failures are **logged but do not crash** the main workflow
+- Both channels can be enabled simultaneously
+- Custom templates support variable substitution (`{{vault_name}}`, `{{certificate_name}}`, etc.)
+
+**Email notification details include:**
+- Vault name
+- Certificate name
+- Common Name (CN)
+- Subject Alternative Names (SAN)
+- Expiry date
+- Renewal status (SUCCESS/FAILED)
+- Failure reason (if applicable)
+
 ## Usage
 
 ### Automatic Mode (Recommended)
@@ -458,6 +510,8 @@ jobs:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           PFX_PASSWORD: ${{ secrets.PFX_PASSWORD }}  # Optional: encrypt PFX with password
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}  # Optional: for email notifications
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}  # Optional: for Teams notifications
         run: python main.py --auto --verbose
 ```
 
@@ -567,6 +621,8 @@ jobs:
 | `AZURE_TENANT_ID` | Yes | Azure AD tenant ID |
 | `AZURE_SUBSCRIPTION_ID` | For renewal | Default Azure subscription ID |
 | `PFX_PASSWORD` | No | Password for PFX certificate encryption (see below) |
+| `SENDGRID_API_KEY` | For email | SendGrid API key (required if email notifications enabled) |
+| `TEAMS_WEBHOOK_URL` | For Teams | Microsoft Teams incoming webhook URL (alternative to config) |
 
 ### PFX Password Support
 
@@ -653,6 +709,22 @@ python main.py --auto
 
 **Permission denied uploading to Key Vault**
 - Grant 'Key Vault Administrator' or 'Key Vault Certificates Officer' role
+
+**Email notifications not being sent**
+- Verify `SENDGRID_API_KEY` environment variable is set
+- Ensure the `from_email` address is verified in SendGrid
+- Check that `email.enabled` is `true` in config
+- Check logs for SendGrid API error messages
+
+**Teams notifications not being sent**
+- Verify the webhook URL is correct and active
+- Ensure `TEAMS_WEBHOOK_URL` env var or `teams.webhook_url` config is set
+- Check that `teams.enabled` is `true` in config
+- Teams webhook URLs expire if the connector is removed from the channel
+
+**Notifications sent but content is wrong**
+- If using custom templates, verify variable names match: `{{vault_name}}`, `{{certificate_name}}`, `{{common_name}}`, `{{san_list}}`, `{{expiry_date}}`, `{{status}}`, `{{failure_reason}}`
+- Check template file path is correct relative to the project root
 
 ## License
 

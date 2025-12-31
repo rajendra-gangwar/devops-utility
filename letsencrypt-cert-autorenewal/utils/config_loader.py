@@ -121,6 +121,30 @@ class VaultConfig:
 
 
 @dataclass
+class EmailNotificationConfig:
+    """Email notification configuration."""
+    enabled: bool = False
+    from_email: str = ""
+    to_emails: List[str] = field(default_factory=list)
+    template_path: Optional[str] = None
+
+
+@dataclass
+class TeamsNotificationConfig:
+    """Teams notification configuration."""
+    enabled: bool = False
+    webhook_url: Optional[str] = None
+    template_path: Optional[str] = None
+
+
+@dataclass
+class NotificationsConfig:
+    """Notification channels configuration."""
+    email: EmailNotificationConfig = field(default_factory=EmailNotificationConfig)
+    teams: TeamsNotificationConfig = field(default_factory=TeamsNotificationConfig)
+
+
+@dataclass
 class Settings:
     """Global settings."""
     expiration_threshold_days: int = 10
@@ -143,6 +167,7 @@ class Config:
     settings: Settings
     dns_providers: DNSProvidersConfig
     vaults: List[VaultConfig]
+    notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
 
 
 def _expand_env_vars(value: Any) -> Any:
@@ -315,6 +340,43 @@ def _parse_settings(data: Dict[str, Any]) -> Settings:
     return settings
 
 
+def _parse_notifications(data: Dict[str, Any]) -> NotificationsConfig:
+    """
+    Parse notifications configuration.
+
+    Args:
+        data: Raw notifications data from YAML
+
+    Returns:
+        NotificationsConfig instance
+    """
+    # Parse email configuration
+    email_data = data.get("email", {})
+    to_emails = email_data.get("to_emails", [])
+    if isinstance(to_emails, str):
+        to_emails = [to_emails]
+
+    email_config = EmailNotificationConfig(
+        enabled=email_data.get("enabled", False),
+        from_email=email_data.get("from_email", ""),
+        to_emails=to_emails,
+        template_path=email_data.get("template_path"),
+    )
+
+    # Parse Teams configuration
+    teams_data = data.get("teams", {})
+    teams_config = TeamsNotificationConfig(
+        enabled=teams_data.get("enabled", False),
+        webhook_url=teams_data.get("webhook_url"),
+        template_path=teams_data.get("template_path"),
+    )
+
+    return NotificationsConfig(
+        email=email_config,
+        teams=teams_config,
+    )
+
+
 def load_config(config_path: str) -> Config:
     """
     Load and validate configuration from a YAML file.
@@ -366,6 +428,7 @@ def load_config(config_path: str) -> Config:
     settings = _parse_settings(data.get("settings", {}))
     dns_providers = _parse_dns_providers(data.get("dns_providers", {}))
     vaults = _parse_vaults(data.get("vaults", []))
+    notifications = _parse_notifications(data.get("notifications", {}))
 
     if not vaults:
         raise ConfigurationError("At least one vault must be configured")
@@ -375,8 +438,20 @@ def load_config(config_path: str) -> Config:
     logger.info(f"  AWS accounts: {len(dns_providers.route53_accounts)}")
     logger.info(f"  Azure subscriptions: {len(dns_providers.azure_subscriptions)}")
 
+    # Log notification configuration
+    enabled_channels = []
+    if notifications.email.enabled:
+        enabled_channels.append("email")
+    if notifications.teams.enabled:
+        enabled_channels.append("teams")
+    if enabled_channels:
+        logger.info(f"  Notifications: {', '.join(enabled_channels)}")
+    else:
+        logger.info("  Notifications: disabled")
+
     return Config(
         settings=settings,
         dns_providers=dns_providers,
         vaults=vaults,
+        notifications=notifications,
     )
