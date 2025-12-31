@@ -125,23 +125,31 @@ class SendGridNotifier(NotificationSender):
         # Format SAN list
         san_str = ", ".join(context.san_list) if context.san_list else "N/A"
 
-        # Status class and styling
+        # Status styling for email
         if context.status == "SUCCESS":
-            status_class = "status-success"
             status_emoji = "&#x2705;"  # Green checkmark
             border_color = "#28a745"
+            header_bg_color = "#28a745"
+            status_bg_color = "#d4edda"
+            status_text_color = "#155724"
         else:
-            status_class = "status-failed"
             status_emoji = "&#x274C;"  # Red X
             border_color = "#dc3545"
+            header_bg_color = "#dc3545"
+            status_bg_color = "#f8d7da"
+            status_text_color = "#721c24"
 
-        # Failure section (only if failed)
+        # Failure section (only if failed) - using table-based layout for email compatibility
         failure_section = ""
         if context.failure_reason:
-            failure_section = f'''<div class="failure-section">
-                <span class="label">Failure Reason</span>
-                <span class="value">{context.failure_reason}</span>
-            </div>'''
+            failure_section = f'''<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 15px;">
+                <tr>
+                    <td style="padding: 20px; background-color: #fff3f3; border-radius: 6px; border-left: 4px solid #dc3545;">
+                        <span style="display: block; font-weight: 600; color: #721c24; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Failure Reason</span>
+                        <span style="color: #721c24; font-family: Courier New, monospace; font-size: 14px;">{context.failure_reason}</span>
+                    </td>
+                </tr>
+            </table>'''
 
         # Replace placeholders
         html = template.replace("{{vault_name}}", context.vault_name)
@@ -150,9 +158,11 @@ class SendGridNotifier(NotificationSender):
         html = html.replace("{{san_list}}", san_str)
         html = html.replace("{{expiry_date}}", expiry_str)
         html = html.replace("{{status}}", context.status)
-        html = html.replace("{{status_class}}", status_class)
         html = html.replace("{{status_emoji}}", status_emoji)
         html = html.replace("{{border_color}}", border_color)
+        html = html.replace("{{header_bg_color}}", header_bg_color)
+        html = html.replace("{{status_bg_color}}", status_bg_color)
+        html = html.replace("{{status_text_color}}", status_text_color)
         html = html.replace("{{failure_section}}", failure_section)
         html = html.replace("{{failure_reason}}", context.failure_reason or "")
 
@@ -174,7 +184,7 @@ class SendGridNotifier(NotificationSender):
 
         try:
             html_content = self._render_template(context)
-            subject = f"Certificate Renewal {context.status}: {context.certificate_name}"
+            subject = f"{context.status}: Let's Encrypt Certificate Auto Renewal Notification for {context.certificate_name}"
 
             # Build SendGrid API request
             payload = {
