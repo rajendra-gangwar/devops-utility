@@ -8,6 +8,8 @@ This guide provides step-by-step instructions for setting up and using the Let's
 - [Configuration Guide](#configuration-guide)
 - [Environment Variables](#environment-variables)
 - [Usage Examples](#usage-examples)
+- [Duplicate Detection & Smart Renewal](#duplicate-detection--smart-renewal)
+- [Certificate Artifact Export](#certificate-artifact-export)
 - [GitHub Actions Setup](#github-actions-setup)
 - [Error Reference & Troubleshooting](#error-reference--troubleshooting)
 - [Pre-Production Checklist](#pre-production-checklist)
@@ -424,6 +426,82 @@ python main.py --auto --json-summary
 | `--elliptic-curve {secp256r1,secp384r1}` | Override ECDSA curve |
 | `--aws-region REGION` | Override AWS region |
 | `--json-summary` | Output JSON summary |
+| `--artifact-dir DIR` | Save PFX files to directory for GitHub artifacts |
+
+---
+
+## Duplicate Detection & Smart Renewal
+
+When running in automatic mode (`--auto`), the tool automatically detects and handles duplicate certificates across vaults.
+
+### What It Does
+
+1. **Scans All Vaults**: Builds a global inventory of all Let's Encrypt certificates
+2. **Groups by SANs**: Identifies certificates with identical Subject Alternative Names
+3. **Smart Renewal**: If any certificate in a group needs renewal:
+   - Renews the certificate ONCE via Let's Encrypt
+   - Uploads to ALL vaults that have that certificate
+
+### Benefits
+
+- **Fewer Let's Encrypt Requests**: Avoids rate limits by not renewing the same certificate multiple times
+- **Consistent Certificates**: All environments (prod, staging, etc.) get the exact same certificate
+- **Efficient**: Only one Certbot execution per unique domain set
+
+### Example Scenario
+
+You have the same certificate (`api.example.com`) in both `prod-keyvault` and `staging-keyvault`:
+
+```
+prod-keyvault/api-cert     → api.example.com (expires in 45 days)
+staging-keyvault/api-cert  → api.example.com (expires in 5 days)
+```
+
+**What happens:**
+1. Tool detects both certificates have identical SANs
+2. Groups them together
+3. Renewal triggered because staging-keyvault cert is expiring
+4. Certbot runs ONCE
+5. Same renewed certificate uploaded to BOTH vaults
+
+---
+
+## Certificate Artifact Export
+
+Save renewed certificates as PFX files for backup or GitHub Actions artifacts.
+
+### Basic Usage
+
+```bash
+python main.py --auto --artifact-dir ./artifacts
+```
+
+### File Naming Convention
+
+Files are saved as: `<keyvault>-<cert-name>-<YYYYMMDD>.pfx`
+
+**Examples:**
+- `prod-keyvault-api-cert-20251225.pfx`
+- `staging-keyvault-web-cert-20251225.pfx`
+
+### GitHub Actions Integration
+
+```yaml
+- name: Run certificate renewal
+  run: python main.py --auto --artifact-dir ./artifacts
+
+- name: Upload certificate artifacts
+  uses: actions/upload-artifact@v4
+  with:
+    name: certificates
+    path: ./artifacts/*.pfx
+    retention-days: 7
+```
+
+This allows you to:
+- Download certificates from the workflow run
+- Use them in other deployment pipelines
+- Keep a backup of renewed certificates
 
 ---
 

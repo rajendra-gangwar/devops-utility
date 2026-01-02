@@ -5,9 +5,10 @@ Provides helper functions for date calculations, certificate validation,
 and other common operations.
 """
 
+import os
 import re
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Union, List, Tuple, Any
+from typing import Optional, Union, List, Tuple, Any, FrozenSet
 from dataclasses import dataclass
 from enum import Enum
 
@@ -316,3 +317,75 @@ def select_certificates(
         total_discovered=len(all_certificates),
         selections=selections,
     )
+
+
+def normalize_san_signature(domains: List[str]) -> FrozenSet[str]:
+    """
+    Create a normalized SAN signature for duplicate detection.
+
+    The signature is order-independent and case-insensitive,
+    allowing identification of certificates with identical domain coverage.
+
+    Args:
+        domains: List of domain names (CN + SANs)
+
+    Returns:
+        Frozen set of normalized domain names for comparison
+    """
+    return frozenset(d.lower().strip() for d in domains if d)
+
+
+def generate_certificate_filename(
+    vault_name: str,
+    cert_name: str,
+    date: Optional[datetime] = None,
+) -> str:
+    """
+    Generate consistent certificate filename.
+
+    Format: <vault_name>-<cert_name>-<YYYYMMDD>.pfx
+
+    Args:
+        vault_name: Name of the Key Vault
+        cert_name: Name of the certificate
+        date: Date to use in filename (defaults to current date)
+
+    Returns:
+        Formatted filename string
+
+    Examples:
+        >>> generate_certificate_filename("prod-keyvault", "api-cert")
+        "prod-keyvault-api-cert-20251225.pfx"
+    """
+    if date is None:
+        date = datetime.now(timezone.utc)
+    date_str = date.strftime("%Y%m%d")
+    return f"{vault_name}-{cert_name}-{date_str}.pfx"
+
+
+def save_pfx_artifact(
+    pfx_data: bytes,
+    artifact_dir: str,
+    vault_name: str,
+    cert_name: str,
+    date: Optional[datetime] = None,
+) -> str:
+    """
+    Save PFX certificate to artifact directory with consistent naming.
+
+    Args:
+        pfx_data: PFX certificate data as bytes
+        artifact_dir: Directory to save the artifact
+        vault_name: Name of the Key Vault
+        cert_name: Name of the certificate
+        date: Date to use in filename (defaults to current date)
+
+    Returns:
+        Full path to the saved artifact file
+    """
+    os.makedirs(artifact_dir, exist_ok=True)
+    filename = generate_certificate_filename(vault_name, cert_name, date)
+    artifact_path = os.path.join(artifact_dir, filename)
+    with open(artifact_path, "wb") as f:
+        f.write(pfx_data)
+    return artifact_path

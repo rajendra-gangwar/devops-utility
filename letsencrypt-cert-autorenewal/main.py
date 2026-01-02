@@ -28,8 +28,9 @@ import argparse
 import json
 import os
 import sys
+from collections import defaultdict
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, FrozenSet
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 
@@ -48,6 +49,9 @@ from utils.helpers import (
     format_days_remaining,
     select_certificates,
     SelectionReason,
+    normalize_san_signature,
+    generate_certificate_filename,
+    save_pfx_artifact,
 )
 from utils.notification import NotificationManager, NotificationContext
 
@@ -58,6 +62,35 @@ class RenewalStatus(Enum):
     SKIPPED = "skipped"
     FAILED = "failed"
     IGNORED = "ignored"
+
+
+@dataclass
+class CertificateRecord:
+    """
+    Record of a certificate discovered during inventory scan.
+
+    Used for global certificate inventory and duplicate detection.
+    """
+    vault_name: str
+    vault_url: str
+    cert_name: str
+    common_name: str
+    san_list: List[str]
+    san_signature: FrozenSet[str]  # Normalized SANs for comparison
+    expiry_date: Optional[datetime]
+    thumbprint: Optional[str]
+    needs_renewal: bool
+    issuer: Optional[str] = None
+
+    def __hash__(self):
+        """Hash based on vault and cert name for set operations."""
+        return hash((self.vault_name, self.cert_name))
+
+    def __eq__(self, other):
+        """Equality based on vault and cert name."""
+        if not isinstance(other, CertificateRecord):
+            return False
+        return self.vault_name == other.vault_name and self.cert_name == other.cert_name
 
 
 def get_pfx_password(args_password: Optional[str] = None) -> Optional[str]:
@@ -359,6 +392,12 @@ Examples:
         action="store_true",
         help="Output machine-readable JSON summary at the end of execution",
     )
+    parser.add_argument(
+        "--artifact-dir",
+        type=str,
+        default=None,
+        help="Directory to save PFX certificates for GitHub artifacts (e.g., ./artifacts)",
+    )
 
     # Key type configuration (overrides config.yaml)
     parser.add_argument(
@@ -404,6 +443,349 @@ Examples:
             parser.error("Manual mode requires --certificate-name")
 
     return args
+
+
+def build_certificate_inventory(
+    config: Config,
+    threshold_days: int,
+) -> Dict[FrozenSet[str], List[CertificateRecord]]:
+    """
+    Scan all configured vaults and build a global certificate inventory.
+
+    Groups certificates by their SAN signature for duplicate detection.
+
+    Args:
+        config: Global configuration with vault settings
+        threshold_days: Number of days before expiration to mark as needs_renewal
+
+    Returns:
+        Dictionary mapping SAN_SIGNATURE → [CertificateRecord, ...]
+    """
+    logger = get_logger()
+    inventory: Dict[FrozenSet[str], List[CertificateRecord]] = defaultdict(list)
+
+    logger.info("=" * 60)
+    logger.info("PHASE 1: Building Global Certificate Inventory")
+    logger.info("=" * 60)
+
+    for vault_config in config.vaults:
+        logger.info(f"\nScanning vault: {vault_config.name}")
+        logger.info(f"  URL: {vault_config.url}")
+
+        try:
+            # Connect to Key Vault
+            kv_client = KeyVaultClient(vault_config.url)
+
+            # List all certificates from vault
+            all_certificates = kv_client.list_certificates()
+
+            # Apply certificate selection logic
+            selection = select_certificates(
+                all_certificates=all_certificates,
+                include_list=vault_config.include_certificates,
+                ignore_list=vault_config.ignore_certificates,
+            )
+
+            logger.info(f"  Found {selection.total_discovered} certificate(s), "
+                       f"{len(selection.selected)} selected, "
+                       f"{len(selection.ignored)} ignored")
+
+            # Process selected certificates
+            for cert_info in selection.selected:
+                # Only include Let's Encrypt certificates
+                if not is_letsencrypt_issuer(cert_info.issuer):
+                    logger.debug(f"    [{cert_info.name}] Skipping - not Let's Encrypt")
+                    continue
+
+                # Compute SAN signature
+                san_signature = normalize_san_signature(cert_info.domains)
+
+                # Check if needs renewal
+                needs_renewal = is_expiring_soon(cert_info.expires_on, threshold_days)
+
+                # Create certificate record
+                record = CertificateRecord(
+                    vault_name=vault_config.name,
+                    vault_url=vault_config.url,
+                    cert_name=cert_info.name,
+                    common_name=cert_info.domains[0] if cert_info.domains else "",
+                    san_list=cert_info.domains,
+                    san_signature=san_signature,
+                    expiry_date=cert_info.expires_on,
+                    thumbprint=cert_info.thumbprint,
+                    needs_renewal=needs_renewal,
+                    issuer=cert_info.issuer,
+                )
+
+                inventory[san_signature].append(record)
+
+                days_remaining = format_days_remaining(cert_info.expires_on)
+                status = "EXPIRING" if needs_renewal else "OK"
+                logger.debug(f"    [{cert_info.name}] {status} - {days_remaining} days remaining")
+
+        except Exception as e:
+            logger.warning(f"  Failed to scan vault {vault_config.name}: {e}")
+            # Continue with other vaults
+
+    return dict(inventory)
+
+
+def log_inventory_summary(
+    inventory: Dict[FrozenSet[str], List[CertificateRecord]],
+) -> None:
+    """
+    Log summary of certificate inventory with duplicate detection.
+
+    Args:
+        inventory: Certificate inventory grouped by SAN signature
+    """
+    logger = get_logger()
+
+    total_certs = sum(len(group) for group in inventory.values())
+    total_groups = len(inventory)
+    duplicate_groups = sum(1 for group in inventory.values() if len(group) > 1)
+    needs_renewal = sum(1 for group in inventory.values() if any(c.needs_renewal for c in group))
+
+    logger.info("")
+    logger.info("-" * 60)
+    logger.info("INVENTORY SUMMARY")
+    logger.info("-" * 60)
+    logger.info(f"  Total certificates discovered: {total_certs}")
+    logger.info(f"  Unique SAN groups: {total_groups}")
+    logger.info(f"  Duplicate groups (same SANs across vaults): {duplicate_groups}")
+    logger.info(f"  Groups needing renewal: {needs_renewal}")
+
+    # Log duplicate groups
+    if duplicate_groups > 0:
+        logger.info("")
+        logger.info("  Duplicate groups detected:")
+        for san_sig, group in sorted(inventory.items(), key=lambda x: sorted(x[0])):
+            if len(group) > 1:
+                san_display = ", ".join(sorted(san_sig))
+                logger.info(f"    SANs: {san_display}")
+                for cert in group:
+                    days = format_days_remaining(cert.expiry_date)
+                    status = "EXPIRING" if cert.needs_renewal else "OK"
+                    logger.info(f"      - {cert.vault_name}/{cert.cert_name} ({status}, {days} days)")
+
+    logger.info("-" * 60)
+
+
+def process_certificate_group(
+    group: List[CertificateRecord],
+    config: Config,
+    dry_run: bool,
+    pfx_password: Optional[str],
+    artifact_dir: Optional[str],
+    notification_manager: Optional[NotificationManager],
+) -> List[RenewalResult]:
+    """
+    Process a group of certificates with identical SANs.
+
+    If any certificate in the group needs renewal:
+    - Renew ONCE using Certbot
+    - Upload the renewed certificate to ALL vaults in the group
+
+    Args:
+        group: List of CertificateRecord with identical SANs
+        config: Global configuration
+        dry_run: If True, don't make actual changes
+        pfx_password: Password for PFX certificate
+        artifact_dir: Directory to save PFX artifacts (optional)
+        notification_manager: Optional notification manager
+
+    Returns:
+        List of RenewalResult for each certificate in the group
+    """
+    logger = get_logger()
+    results: List[RenewalResult] = []
+
+    if not group:
+        return results
+
+    # Get SAN signature for logging
+    san_signature = group[0].san_signature
+    san_display = ", ".join(sorted(san_signature))
+    domains = group[0].san_list
+
+    logger.info("")
+    logger.info(f"Processing certificate group: {san_display}")
+    logger.info(f"  Certificates in group: {len(group)}")
+
+    # Check if any certificate needs renewal
+    certs_needing_renewal = [c for c in group if c.needs_renewal]
+    logger.info(f"  Certificates needing renewal: {len(certs_needing_renewal)}")
+
+    if not certs_needing_renewal:
+        logger.info(f"  Decision: SKIP (all certificates valid)")
+        # Return skipped results for all
+        for cert in group:
+            days = format_days_remaining(cert.expiry_date)
+            results.append(RenewalResult(
+                vault_name=cert.vault_name,
+                certificate_name=cert.cert_name,
+                status=RenewalStatus.SKIPPED,
+                message=f"Not expiring soon ({days} days remaining)",
+                domains=cert.san_list,
+            ))
+        return results
+
+    # At least one needs renewal
+    trigger_cert = certs_needing_renewal[0]
+    logger.info(f"  Decision: RENEW (triggered by: {trigger_cert.vault_name}/{trigger_cert.cert_name})")
+
+    if dry_run:
+        logger.info(f"  DRY RUN - would renew certificate and upload to {len(group)} vault(s)")
+        for cert in group:
+            results.append(RenewalResult(
+                vault_name=cert.vault_name,
+                certificate_name=cert.cert_name,
+                status=RenewalStatus.RENEWED,
+                message="Dry run - would renew",
+                domains=cert.san_list,
+            ))
+        return results
+
+    try:
+        # Find DNS zone info
+        primary_domain = domains[0] if domains else ""
+        dns_zone_info = config.dns_providers.find_zone_for_domain(primary_domain)
+
+        if not dns_zone_info:
+            raise ValueError(
+                f"No DNS zone configured for domain '{primary_domain}'. "
+                "Add the zone to dns_providers in config.yaml"
+            )
+
+        dns_provider = dns_zone_info["provider"]
+        logger.info(f"  Using {dns_provider} for zone '{dns_zone_info['zone']}'")
+
+        # Run Certbot renewal ONCE
+        logger.info(f"  Running Certbot renewal...")
+        cert_paths = run_certbot_renewal(
+            domains=domains,
+            dns_provider=dns_provider,
+            email=config.settings.letsencrypt_email,
+            config=config,
+            dns_zone_info=dns_zone_info,
+        )
+
+        # Convert to PFX format ONCE
+        logger.info(f"  Converting to PFX format...")
+        pfx_data = convert_to_pfx(
+            cert_path=cert_paths["cert"],
+            key_path=cert_paths["privkey"],
+            chain_path=cert_paths["chain"],
+            password=pfx_password,
+        )
+
+        # Get new expiry date for notifications
+        new_expiry_date = get_certificate_expiry(cert_paths["cert"])
+
+        # Save artifact ONCE (using first certificate's naming)
+        if artifact_dir:
+            artifact_path = save_pfx_artifact(
+                pfx_data=pfx_data,
+                artifact_dir=artifact_dir,
+                vault_name=trigger_cert.vault_name,
+                cert_name=trigger_cert.cert_name,
+            )
+            logger.info(f"  Saved artifact: {artifact_path}")
+
+        # Upload to ALL vaults in the group
+        logger.info(f"  Uploading to {len(group)} vault(s):")
+        for cert in group:
+            try:
+                kv_client = KeyVaultClient(cert.vault_url)
+                upload_certificate(
+                    client=kv_client,
+                    cert_name=cert.cert_name,
+                    pfx_data=pfx_data,
+                    password=pfx_password,
+                )
+
+                filename = generate_certificate_filename(cert.vault_name, cert.cert_name)
+                logger.info(f"    - {cert.vault_name}/{cert.cert_name} → {filename} SUCCESS")
+
+                # Save artifact for each vault (with vault-specific naming)
+                if artifact_dir:
+                    vault_artifact_path = save_pfx_artifact(
+                        pfx_data=pfx_data,
+                        artifact_dir=artifact_dir,
+                        vault_name=cert.vault_name,
+                        cert_name=cert.cert_name,
+                    )
+                    logger.debug(f"      Artifact: {vault_artifact_path}")
+
+                # Send success notification
+                if notification_manager and notification_manager.is_enabled():
+                    _send_certificate_notification(
+                        notification_manager=notification_manager,
+                        vault_name=cert.vault_name,
+                        cert_name=cert.cert_name,
+                        domains=cert.san_list,
+                        expiry_date=new_expiry_date,
+                        status="SUCCESS",
+                    )
+
+                results.append(RenewalResult(
+                    vault_name=cert.vault_name,
+                    certificate_name=cert.cert_name,
+                    status=RenewalStatus.RENEWED,
+                    message="Successfully renewed",
+                    domains=cert.san_list,
+                ))
+
+            except Exception as upload_error:
+                error_msg = str(upload_error)
+                logger.error(f"    - {cert.vault_name}/{cert.cert_name} FAILED: {error_msg}")
+
+                # Send failure notification
+                if notification_manager and notification_manager.is_enabled():
+                    _send_certificate_notification(
+                        notification_manager=notification_manager,
+                        vault_name=cert.vault_name,
+                        cert_name=cert.cert_name,
+                        domains=cert.san_list,
+                        expiry_date=cert.expiry_date,
+                        status="FAILED",
+                        failure_reason=f"Upload failed: {error_msg}",
+                    )
+
+                results.append(RenewalResult(
+                    vault_name=cert.vault_name,
+                    certificate_name=cert.cert_name,
+                    status=RenewalStatus.FAILED,
+                    message=f"Upload failed: {error_msg}",
+                    domains=cert.san_list,
+                ))
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"  Renewal failed: {error_msg}")
+
+        # Mark all certificates in group as failed
+        for cert in group:
+            if notification_manager and notification_manager.is_enabled():
+                _send_certificate_notification(
+                    notification_manager=notification_manager,
+                    vault_name=cert.vault_name,
+                    cert_name=cert.cert_name,
+                    domains=cert.san_list,
+                    expiry_date=cert.expiry_date,
+                    status="FAILED",
+                    failure_reason=error_msg,
+                )
+
+            results.append(RenewalResult(
+                vault_name=cert.vault_name,
+                certificate_name=cert.cert_name,
+                status=RenewalStatus.FAILED,
+                message=error_msg,
+                domains=cert.san_list,
+            ))
+
+    return results
 
 
 def _send_certificate_notification(
@@ -1257,18 +1639,91 @@ def main() -> int:
             summary.add_vault_summary(vault_summary)
 
         elif args.auto:
-            # Automatic mode - process all vaults
-            logger.info(f"\nProcessing {len(config.vaults)} vault(s)...")
+            # Automatic mode - use inventory-based processing with duplicate detection
+            logger.info(f"\nScanning {len(config.vaults)} vault(s) for certificates...")
 
-            for vault_config in config.vaults:
-                vault_summary = process_vault(
-                    vault_config=vault_config,
+            # Phase 1: Build global certificate inventory
+            inventory = build_certificate_inventory(
+                config=config,
+                threshold_days=config.settings.expiration_threshold_days,
+            )
+
+            # Log inventory summary
+            log_inventory_summary(inventory)
+
+            # Phase 2: Process each certificate group
+            logger.info("")
+            logger.info("=" * 60)
+            logger.info("PHASE 2: Processing Certificate Groups")
+            logger.info("=" * 60)
+
+            # Track per-vault summaries for reporting
+            vault_summaries: Dict[str, VaultSummary] = {}
+
+            # Process groups in deterministic order (sorted by SAN signature)
+            groups_processed = 0
+            groups_renewed = 0
+
+            for san_signature in sorted(inventory.keys(), key=lambda x: sorted(x)):
+                group = inventory[san_signature]
+                groups_processed += 1
+
+                # Process the group
+                results = process_certificate_group(
+                    group=group,
                     config=config,
                     dry_run=args.dry_run,
                     pfx_password=pfx_password,
+                    artifact_dir=args.artifact_dir,
                     notification_manager=notification_manager,
                 )
-                summary.add_vault_summary(vault_summary)
+
+                # Track if this group was renewed
+                if any(r.status == RenewalStatus.RENEWED for r in results):
+                    groups_renewed += 1
+
+                # Aggregate results into per-vault summaries
+                for result in results:
+                    vault_name = result.vault_name
+
+                    if vault_name not in vault_summaries:
+                        # Find vault URL
+                        vault_url = ""
+                        for vc in config.vaults:
+                            if vc.name == vault_name:
+                                vault_url = vc.url
+                                break
+
+                        vault_summaries[vault_name] = VaultSummary(
+                            name=vault_name,
+                            url=vault_url,
+                        )
+
+                    vs = vault_summaries[vault_name]
+                    vs.results.append(result)
+                    vs.certificates_discovered += 1
+                    vs.certificates_selected += 1
+
+                    if result.status == RenewalStatus.RENEWED:
+                        vs.renewed += 1
+                    elif result.status == RenewalStatus.SKIPPED:
+                        vs.skipped += 1
+                    elif result.status == RenewalStatus.FAILED:
+                        vs.failed += 1
+
+            # Add all vault summaries to execution summary
+            for vs in vault_summaries.values():
+                summary.add_vault_summary(vs)
+
+            # Log final summary
+            logger.info("")
+            logger.info("=" * 60)
+            logger.info("RENEWAL SUMMARY")
+            logger.info("=" * 60)
+            logger.info(f"  Total SAN groups processed: {groups_processed}")
+            logger.info(f"  Groups renewed: {groups_renewed}")
+            logger.info(f"  Certificates updated: {summary.total_renewed}")
+            logger.info(f"  Vaults affected: {len(vault_summaries)}")
 
         else:
             # Manual mode - process single certificate

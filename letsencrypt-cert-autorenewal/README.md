@@ -26,6 +26,8 @@ This solution uses **Certbot DNS plugins** which **automatically handle DNS reco
 
 - **Certificate Auto-Discovery**: Automatically finds all certificates in each vault
 - **Let's Encrypt Verification**: Only renews certificates issued by Let's Encrypt
+- **Duplicate Detection**: Identifies certificates with identical SANs across vaults
+- **Smart Renewal**: Renews duplicate certificates once and uploads to all vaults
 - **Ignore List**: Skip specific certificates per vault
 - **Dual Execution Modes**: Automatic (scan all vaults) or Manual (specific certificate)
 - **Multi-Vault Support**: Process multiple Azure Key Vaults in a single run
@@ -35,6 +37,7 @@ This solution uses **Certbot DNS plugins** which **automatically handle DNS reco
 - **Dry-Run Mode**: Test without making actual changes
 - **Colored Logging**: Clear, structured output with color-coded status
 - **Notification System**: Email (SendGrid) and Microsoft Teams notifications for renewal events
+- **Artifact Export**: Save renewed certificates as PFX files for GitHub Actions artifacts
 
 ## Project Structure
 
@@ -487,11 +490,13 @@ python main.py --task create \
 | `--dry-run` | Test mode, no actual changes |
 | `--threshold` | Override expiration threshold (days) |
 | `--pfx-password` | Password for PFX (falls back to PFX_PASSWORD env var) |
+| `--artifact-dir` | Directory to save PFX files for GitHub artifacts (e.g., ./artifacts) |
 | `--key-type` | Certificate key type: rsa or ecdsa (overrides config) |
 | `--rsa-key-size` | RSA key size: 2048, 3072, or 4096 (overrides config) |
 | `--elliptic-curve` | ECDSA curve: secp256r1 or secp384r1 (overrides config) |
 | `--verbose, -v` | Enable debug logging |
 | `--no-color` | Disable colored output |
+| `--json-summary` | Output machine-readable JSON summary
 
 ### Exit Codes
 
@@ -508,6 +513,97 @@ The script applies the following filters when processing certificates:
 1. **Ignore List**: Certificates in `ignore_certificates` are skipped
 2. **Issuer Check**: Only Let's Encrypt certificates are renewed (others are skipped with a log message)
 3. **Expiration Check**: Only certificates expiring within `expiration_threshold_days` are renewed
+
+## Duplicate Detection & Smart Renewal
+
+When running in automatic mode (`--auto`), the script performs intelligent certificate management:
+
+### How It Works
+
+1. **Global Inventory Scan**: Before any renewals, scans ALL configured vaults
+2. **SAN Signature Matching**: Groups certificates by their Subject Alternative Names (order-independent)
+3. **Duplicate Detection**: Identifies certificates with identical SANs across different vaults
+4. **Smart Renewal**: If any certificate in a group needs renewal:
+   - Renews the certificate ONCE via Let's Encrypt
+   - Uploads the renewed certificate to ALL vaults in the group
+
+### Benefits
+
+- **Reduced Let's Encrypt Requests**: Avoids unnecessary duplicate renewal requests
+- **Consistent Certificates**: All vaults receive the exact same certificate
+- **Efficient Processing**: Single Certbot execution per unique SAN set
+
+### Example Log Output
+
+```
+============================================================
+PHASE 1: Building Global Certificate Inventory
+============================================================
+
+Scanning vault: prod-keyvault
+  Found 5 certificate(s), 5 selected, 0 ignored
+
+Scanning vault: staging-keyvault
+  Found 3 certificate(s), 3 selected, 0 ignored
+
+------------------------------------------------------------
+INVENTORY SUMMARY
+------------------------------------------------------------
+  Total certificates discovered: 8
+  Unique SAN groups: 6
+  Duplicate groups (same SANs across vaults): 2
+  Groups needing renewal: 1
+
+  Duplicate groups detected:
+    SANs: api.example.com, example.com
+      - prod-keyvault/api-cert (OK, 45 days)
+      - staging-keyvault/api-cert (EXPIRING, 5 days)
+------------------------------------------------------------
+
+============================================================
+PHASE 2: Processing Certificate Groups
+============================================================
+
+Processing certificate group: api.example.com, example.com
+  Certificates in group: 2
+  Certificates needing renewal: 1
+  Decision: RENEW (triggered by: staging-keyvault/api-cert)
+  Running Certbot renewal...
+  Converting to PFX format...
+  Uploading to 2 vault(s):
+    - prod-keyvault/api-cert → prod-keyvault-api-cert-20251225.pfx SUCCESS
+    - staging-keyvault/api-cert → staging-keyvault-api-cert-20251225.pfx SUCCESS
+```
+
+## Certificate Artifact Export
+
+Save renewed certificates as PFX files for GitHub Actions artifacts:
+
+```bash
+python main.py --auto --artifact-dir ./artifacts
+```
+
+### Artifact Naming Convention
+
+Files are saved with the format: `<keyvault>-<cert-name>-<YYYYMMDD>.pfx`
+
+Examples:
+- `prod-keyvault-api-cert-20251225.pfx`
+- `staging-keyvault-web-cert-20251225.pfx`
+
+### GitHub Actions Integration
+
+```yaml
+- name: Run certificate renewal
+  run: python main.py --auto --artifact-dir ./artifacts
+
+- name: Upload certificate artifacts
+  uses: actions/upload-artifact@v4
+  with:
+    name: certificates
+    path: ./artifacts/*.pfx
+    retention-days: 7
+```
 
 ## GitHub Actions Examples
 
