@@ -358,12 +358,18 @@ dns_azure_zone1 = {zone}:/subscriptions/{subscription_id}/resourceGroups/{resour
     return {}, creds_path
 
 
+# Let's Encrypt ACME server URLs
+LETSENCRYPT_PRODUCTION_URL = "https://acme-v02.api.letsencrypt.org/directory"
+LETSENCRYPT_STAGING_URL = "https://acme-staging-v02.api.letsencrypt.org/directory"
+
+
 def run_certbot_renewal(
     domains: List[str],
     dns_provider: str,
     email: str,
     config: Config,
     dns_zone_info: Optional[Dict[str, Any]] = None,
+    use_staging: bool = False,
 ) -> Dict[str, str]:
     """
     Run Certbot to renew a certificate.
@@ -374,6 +380,7 @@ def run_certbot_renewal(
         email: Email for Let's Encrypt registration
         config: Global configuration
         dns_zone_info: Optional DNS zone configuration
+        use_staging: If True, use Let's Encrypt staging environment
 
     Returns:
         Dictionary with paths to certificate files:
@@ -390,6 +397,14 @@ def run_certbot_renewal(
     # Check Certbot is installed
     certbot_path = _check_certbot_installed()
 
+    # Determine ACME server URL
+    if use_staging:
+        acme_server = LETSENCRYPT_STAGING_URL
+        logger.info("Using Let's Encrypt STAGING environment")
+    else:
+        acme_server = LETSENCRYPT_PRODUCTION_URL
+        logger.debug("Using Let's Encrypt production environment")
+
     # Setup directories
     work_dir = Path(config.settings.certbot_work_dir)
     logs_dir = Path(config.settings.certbot_logs_dir)
@@ -403,6 +418,7 @@ def run_certbot_renewal(
         certbot_path, "certonly",
         "--non-interactive",
         "--agree-tos",
+        "--server", acme_server,
         "--work-dir", str(work_dir),
         "--logs-dir", str(logs_dir),
         "--config-dir", str(config_dir),
@@ -495,6 +511,7 @@ def run_certbot_create(
     email: str,
     config: Config,
     dns_zone_info: Optional[Dict[str, Any]] = None,
+    use_staging: bool = False,
 ) -> Dict[str, str]:
     """
     Run Certbot to create a new certificate.
@@ -508,6 +525,7 @@ def run_certbot_create(
         email: Email for Let's Encrypt registration
         config: Global configuration
         dns_zone_info: Optional DNS zone configuration
+        use_staging: If True, use Let's Encrypt staging environment
 
     Returns:
         Dictionary with paths to certificate files:
@@ -526,6 +544,7 @@ def run_certbot_create(
         email=email,
         config=config,
         dns_zone_info=dns_zone_info,
+        use_staging=use_staging,
     )
 
 

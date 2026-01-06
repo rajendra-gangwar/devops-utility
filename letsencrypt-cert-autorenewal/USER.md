@@ -418,6 +418,7 @@ python main.py --auto --json-summary
 | `--config FILE` | Path to config file (default: config.yaml) |
 | `--threshold DAYS` | Override expiration threshold |
 | `--dry-run` | Test mode: no actual changes |
+| `--use-staging` | Use Let's Encrypt staging environment (for testing) |
 | `--verbose, -v` | Enable debug logging |
 | `--no-color` | Disable colored output |
 | `--pfx-password PWD` | Password for PFX file |
@@ -427,6 +428,44 @@ python main.py --auto --json-summary
 | `--aws-region REGION` | Override AWS region |
 | `--json-summary` | Output JSON summary |
 | `--artifact-dir DIR` | Save PFX files to directory for GitHub artifacts |
+
+---
+
+## Staging Environment
+
+Use the `--use-staging` flag to issue certificates from Let's Encrypt's staging environment for testing.
+
+### When to Use
+
+- **Testing**: Validate your setup without hitting production rate limits
+- **Development**: Test certificate workflows in dev/test environments
+- **CI/CD**: Verify the renewal pipeline works correctly
+- **Debugging**: Investigate issues without affecting production certificates
+
+### Examples
+
+```bash
+# Test automatic renewal with staging
+python main.py --auto --use-staging
+
+# Full test: staging + dry-run
+python main.py --auto --use-staging --dry-run
+
+# Create test certificate with staging
+python main.py --task create \
+    --san "test.example.com" \
+    --vault-url https://test-kv.vault.azure.net/ \
+    --subscription <sub-id> \
+    --cert-name test-cert \
+    --use-staging
+```
+
+### Important Notes
+
+- **Staging certificates are NOT trusted** by browsers
+- Issued by "Fake LE Intermediate" / "Fake LE Root"
+- Much higher rate limits (30,000/week vs 50/week for production)
+- Mode is logged at startup and in execution summary
 
 ---
 

@@ -177,6 +177,7 @@ class ExecutionSummary:
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     completed_at: Optional[str] = None
     dry_run: bool = False
+    use_staging: bool = False  # True if using Let's Encrypt staging environment
     success: bool = True
     exit_code: int = 0
 
@@ -258,6 +259,8 @@ class ExecutionSummary:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "dry_run": self.dry_run,
+            "use_staging": self.use_staging,
+            "letsencrypt_environment": "staging" if self.use_staging else "production",
             "success": self.success,
             "exit_code": self.exit_code,
             "summary": {
@@ -422,6 +425,13 @@ Examples:
         help="ECDSA curve: secp256r1 or secp384r1 (overrides config.yaml)",
     )
 
+    # Let's Encrypt environment selection
+    parser.add_argument(
+        "--use-staging",
+        action="store_true",
+        help="Use Let's Encrypt staging environment for testing (avoids production rate limits)",
+    )
+
     args = parser.parse_args()
 
     # Validate arguments based on task/mode
@@ -578,6 +588,7 @@ def process_certificate_group(
     pfx_password: Optional[str],
     artifact_dir: Optional[str],
     notification_manager: Optional[NotificationManager],
+    use_staging: bool = False,
 ) -> List[RenewalResult]:
     """
     Process a group of certificates with identical SANs.
@@ -593,6 +604,7 @@ def process_certificate_group(
         pfx_password: Password for PFX certificate
         artifact_dir: Directory to save PFX artifacts (optional)
         notification_manager: Optional notification manager
+        use_staging: If True, use Let's Encrypt staging environment
 
     Returns:
         List of RenewalResult for each certificate in the group
@@ -668,6 +680,7 @@ def process_certificate_group(
             email=config.settings.letsencrypt_email,
             config=config,
             dns_zone_info=dns_zone_info,
+            use_staging=use_staging,
         )
 
         # Convert to PFX format ONCE
@@ -835,6 +848,7 @@ def process_certificate(
     dry_run: bool = False,
     pfx_password: Optional[str] = None,
     notification_manager: Optional[NotificationManager] = None,
+    use_staging: bool = False,
 ) -> RenewalResult:
     """
     Process a single certificate for potential renewal.
@@ -847,6 +861,7 @@ def process_certificate(
         dry_run: If True, don't make actual changes
         pfx_password: Password for PFX certificate
         notification_manager: Optional notification manager for sending alerts
+        use_staging: If True, use Let's Encrypt staging environment
 
     Returns:
         RenewalResult with status and details
@@ -923,6 +938,7 @@ def process_certificate(
             email=config.settings.letsencrypt_email,
             config=config,
             dns_zone_info=dns_zone_info,
+            use_staging=use_staging,
         )
 
         # Convert to PFX format
@@ -1050,6 +1066,7 @@ def process_vault(
     dry_run: bool = False,
     pfx_password: Optional[str] = None,
     notification_manager: Optional[NotificationManager] = None,
+    use_staging: bool = False,
 ) -> VaultSummary:
     """
     Process certificates in a vault based on include/ignore configuration.
@@ -1065,6 +1082,7 @@ def process_vault(
         dry_run: If True, don't make actual changes
         pfx_password: Password for PFX certificate
         notification_manager: Optional notification manager for sending alerts
+        use_staging: If True, use Let's Encrypt staging environment
 
     Returns:
         VaultSummary with all processing results and statistics
@@ -1127,6 +1145,7 @@ def process_vault(
                 dry_run=dry_run,
                 pfx_password=pfx_password,
                 notification_manager=notification_manager,
+                use_staging=use_staging,
             )
             vault_summary.results.append(result)
 
@@ -1165,6 +1184,7 @@ def process_single_certificate(
     dry_run: bool = False,
     pfx_password: Optional[str] = None,
     notification_manager: Optional[NotificationManager] = None,
+    use_staging: bool = False,
 ) -> RenewalResult:
     """
     Process a single certificate in manual mode.
@@ -1176,6 +1196,7 @@ def process_single_certificate(
         dry_run: If True, don't make actual changes
         pfx_password: Password for PFX certificate
         notification_manager: Optional notification manager for sending alerts
+        use_staging: If True, use Let's Encrypt staging environment
 
     Returns:
         RenewalResult with status and details
@@ -1222,6 +1243,7 @@ def process_single_certificate(
             dry_run=dry_run,
             pfx_password=pfx_password,
             notification_manager=notification_manager,
+            use_staging=use_staging,
         )
 
     except Exception as e:
@@ -1243,6 +1265,7 @@ def create_certificate(
     dry_run: bool = False,
     pfx_password: Optional[str] = None,
     notification_manager: Optional[NotificationManager] = None,
+    use_staging: bool = False,
 ) -> RenewalResult:
     """
     Create a new certificate and upload to Key Vault.
@@ -1256,6 +1279,7 @@ def create_certificate(
         dry_run: If True, don't make actual changes
         pfx_password: Password for PFX certificate
         notification_manager: Optional notification manager for sending alerts
+        use_staging: If True, use Let's Encrypt staging environment
 
     Returns:
         RenewalResult with status and details
@@ -1299,6 +1323,7 @@ def create_certificate(
             email=config.settings.letsencrypt_email,
             config=config,
             dns_zone_info=dns_zone_info,
+            use_staging=use_staging,
         )
 
         # Convert to PFX format
@@ -1396,9 +1421,15 @@ def print_execution_summary(
     status_str = "SUCCESS" if summary.success else "FAILED"
     if summary.dry_run:
         status_str += " (DRY RUN)"
+    if summary.use_staging:
+        status_str += " (STAGING)"
+
+    # Let's Encrypt environment
+    le_env = "STAGING" if summary.use_staging else "PRODUCTION"
 
     logger.info(f"Status: {status_str}")
     logger.info(f"Task: {summary.task}")
+    logger.info(f"Let's Encrypt Environment: {le_env}")
     logger.info(f"Started: {summary.started_at}")
     logger.info(f"Completed: {summary.completed_at}")
     logger.info("")
@@ -1553,6 +1584,13 @@ def main() -> int:
     if args.dry_run:
         logger.warning("DRY RUN MODE - No changes will be made")
 
+    # Log Let's Encrypt environment mode
+    if args.use_staging:
+        logger.warning("STAGING MODE - Using Let's Encrypt staging environment")
+        logger.warning("Certificates issued will NOT be trusted by browsers")
+    else:
+        logger.info("Using Let's Encrypt production environment")
+
     # Set AWS region from command line argument (highest priority)
     if args.aws_region:
         os.environ["AWS_DEFAULT_REGION"] = args.aws_region
@@ -1570,6 +1608,7 @@ def main() -> int:
     summary = ExecutionSummary(
         task=task_type,
         dry_run=args.dry_run,
+        use_staging=args.use_staging,
     )
 
     try:
@@ -1620,6 +1659,7 @@ def main() -> int:
                 dry_run=args.dry_run,
                 pfx_password=pfx_password,
                 notification_manager=notification_manager,
+                use_staging=args.use_staging,
             )
 
             # Create vault summary for create task
@@ -1676,6 +1716,7 @@ def main() -> int:
                     pfx_password=pfx_password,
                     artifact_dir=args.artifact_dir,
                     notification_manager=notification_manager,
+                    use_staging=args.use_staging,
                 )
 
                 # Track if this group was renewed
@@ -1734,6 +1775,7 @@ def main() -> int:
                 dry_run=args.dry_run,
                 pfx_password=pfx_password,
                 notification_manager=notification_manager,
+                use_staging=args.use_staging,
             )
 
             # Find vault URL from config

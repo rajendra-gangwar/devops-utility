@@ -488,6 +488,7 @@ python main.py --task create \
 | `--subscription` | Create mode: Azure subscription ID |
 | `--config` | Path to config file (default: config.yaml) |
 | `--dry-run` | Test mode, no actual changes |
+| `--use-staging` | Use Let's Encrypt staging environment (for testing) |
 | `--threshold` | Override expiration threshold (days) |
 | `--pfx-password` | Password for PFX (falls back to PFX_PASSWORD env var) |
 | `--artifact-dir` | Directory to save PFX files for GitHub artifacts (e.g., ./artifacts) |
@@ -505,6 +506,51 @@ python main.py --task create \
 | 0 | Success (all certificates processed) |
 | 1 | Failure (one or more renewals failed) |
 | 2 | Configuration error |
+
+## Let's Encrypt Staging Environment
+
+Use the `--use-staging` flag to issue certificates from Let's Encrypt's staging environment for testing purposes.
+
+### When to Use Staging
+
+- **Testing your setup**: Validate DNS configuration and authentication without hitting rate limits
+- **Development environments**: Test certificate issuance workflows
+- **CI/CD pipeline testing**: Verify the renewal process works correctly
+- **Debugging issues**: Investigate problems without affecting production
+
+### Usage
+
+```bash
+# Test with staging environment
+python main.py --auto --use-staging
+
+# Combine with dry-run for full testing
+python main.py --auto --use-staging --dry-run
+
+# Create a test certificate
+python main.py --task create \
+    --san "test.example.com" \
+    --vault-url https://my-keyvault.vault.azure.net/ \
+    --subscription aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee \
+    --cert-name test-cert \
+    --use-staging
+```
+
+### Important Notes
+
+- **Staging certificates are NOT trusted** by browsers or applications
+- Staging certificates are issued by "Fake LE Intermediate" and "Fake LE Root"
+- Staging environment has much higher rate limits than production
+- The mode is clearly logged at startup and in the execution summary
+
+### Rate Limits
+
+| Environment | Certificates per Domain | Duplicate Certificates |
+|-------------|------------------------|------------------------|
+| Production  | 50 per week            | 5 per week             |
+| Staging     | 30,000 per week        | 30,000 per week        |
+
+For more details, see [Let's Encrypt Rate Limits](https://letsencrypt.org/docs/rate-limits/) and [Staging Environment](https://letsencrypt.org/docs/staging-environment/).
 
 ## Certificate Filtering Logic
 
